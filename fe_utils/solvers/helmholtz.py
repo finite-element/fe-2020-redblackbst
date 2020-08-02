@@ -8,6 +8,7 @@ from numpy import cos, pi
 import scipy.sparse as sp
 import scipy.sparse.linalg as splinalg
 from argparse import ArgumentParser
+from matplotlib import pyplot as plt
 
 
 def assemble(fs, f):
@@ -116,4 +117,7 @@ if __name__ == "__main__":
 
     u, error = solve_helmholtz(degree, resolution, analytic, plot_error)
 
-    u.plot()
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    u.plot(ax)
+    plt.show()
