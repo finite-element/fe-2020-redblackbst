@@ -1,6 +1,7 @@
 import numpy as np
-from . import ReferenceTriangle, ReferenceInterval
+from . import ReferenceTriangle, ReferenceInterval, ReferenceRectangle
 from .finite_elements import LagrangeElement, lagrange_points
+from .quadrature import gauss_quadrature
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.tri import Triangulation
@@ -23,15 +24,22 @@ class FunctionSpace(object):
         #: The :class:`~.finite_elements.FiniteElement` of this space.
         self.element = element
 
-        raise NotImplementedError
-
         # Implement global numbering in order to produce the global
         # cell node list for this space.
         #: The global cell node list. This is a two-dimensional array in
         #: which each row lists the global nodes incident to the corresponding
         #: cell. The implementation of this member is left as an
         #: :ref:`exercise <ex-function-space>`
-        self.cell_nodes = None
+        self.cell_nodes = np.zeros((mesh.entity_counts[-1], element.node_count), dtype=int)
+        for c in range(self.cell_nodes.shape[0]):
+            for delta in range(mesh.dim + 1):
+                for epsilon in range(len(element.entity_nodes[delta])):
+                    adj = mesh.adjacency(mesh.dim, delta)[c, epsilon] if delta < mesh.dim else c
+                    G = np.dot(element.nodes_per_entity[:delta], mesh.entity_counts[:delta]) + adj * \
+                        element.nodes_per_entity[delta]
+                    self.cell_nodes[c, [element.entity_nodes[delta][epsilon]]] = range(G,
+                                                                                       G + element.nodes_per_entity[
+                                                                                           delta])
 
         #: The total number of nodes in the function space.
         self.node_count = np.dot(element.nodes_per_entity, mesh.entity_counts)
@@ -87,12 +95,13 @@ class Function(object):
 
             self.values[fs.cell_nodes[c, :]] = [fn(x) for x in node_coords]
 
-    def plot(self, subdivisions=None):
+    def plot(self, ax, subdivisions=None):
         """Plot the value of this :class:`Function`. This is quite a low
         performance plotting routine so it will perform poorly on
         larger meshes, but it has the advantage of supporting higher
         order function spaces than many widely available libraries.
 
+        :param ax: Axis for plotting.
         :param subdivisions: The number of points in each direction to
           use in representing each element. The default is
           :math:`2d+1` where :math:`d` is the degree of the
@@ -106,15 +115,17 @@ class Function(object):
         d = subdivisions or (2 * (fs.element.degree + 1) if fs.element.degree > 1 else 2)
 
         if fs.element.cell is ReferenceInterval:
-            fig = plt.figure()
-            fig.add_subplot(111)
+            # fig.add_subplot(111)
             # Interpolation rule for element values.
             local_coords = lagrange_points(fs.element.cell, d)
 
         elif fs.element.cell is ReferenceTriangle:
-            fig = plt.figure()
-            ax = fig.gca(projection='3d')
+            # ax = fig.gca(projection='3d')
             local_coords, triangles = self._lagrange_triangles(d)
+
+        elif fs.element.cell is ReferenceRectangle:
+            # ax = fig.gca(projection='3d')
+            local_coords = lagrange_points(fs.element.cell, d)
 
         else:
             raise ValueError("Unknown reference cell: %s" % fs.element.cell)
@@ -135,13 +146,14 @@ class Function(object):
 
             if fs.element.cell is ReferenceInterval:
 
-                plt.plot(x[:, 0], v, 'k')
+                ax.plot(x[:, 0], v, 'k')
 
-            else:
+            elif fs.element.cell is ReferenceTriangle:
                 ax.plot_trisurf(Triangulation(x[:, 0], x[:, 1], triangles),
                                 v, linewidth=0)
 
-        plt.show()
+            elif fs.element.cell is ReferenceRectangle:
+                ax.plot_trisurf(x[:, 0], x[:, 1], v, linewidth=0)
 
     @staticmethod
     def _lagrange_triangles(degree):
@@ -158,7 +170,7 @@ class Function(object):
                      for i in range(degree - j)]
                     # Down triangles.
                     + [np.add(np.sum(range(degree + 2 - j, degree + 2)),
-                              (i+1, i + degree + 1 - j + 1, i + degree + 1 - j))
+                              (i + 1, i + degree + 1 - j + 1, i + degree + 1 - j))
                        for j in range(degree - 1)
                        for i in range(degree - 1 - j)]))
 
@@ -167,4 +179,25 @@ class Function(object):
 
         :result: The integral (a scalar)."""
 
-        raise NotImplementedError
+        fs = self.function_space
+        fe = fs.element
+        mesh = fs.mesh
+
+        # Create a quadrature rule which is exact for f**2.
+        Q = gauss_quadrature(fe.cell, 2 * fe.degree)
+
+        # Evaluate the local basis functions at the quadrature points.
+        phi = fe.tabulate(Q.points)
+        quadrature_sum = 0
+        for c in range(mesh.entity_counts[-1]):
+            # Find the appropriate global node numbers for this cell.
+            nodes = fs.cell_nodes[c, :]
+
+            # Compute the change of coordinates.
+            J = mesh.jacobian(c)
+            detJ = np.abs(np.linalg.det(J))
+
+            # Compute the actual cell quadrature.
+            quadrature_sum += np.dot(np.dot(self.values[nodes], phi.T), Q.weights) * detJ
+
+        return quadrature_sum

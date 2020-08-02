@@ -1,7 +1,8 @@
 # Cause division to always mean floating point division.
 from __future__ import division
 import numpy as np
-from .reference_elements import ReferenceInterval, ReferenceTriangle
+from .reference_elements import ReferenceInterval, ReferenceTriangle, ReferenceRectangle
+
 np.seterr(invalid='ignore', divide='ignore')
 
 
@@ -19,7 +20,28 @@ def lagrange_points(cell, degree):
 
     """
 
-    raise NotImplementedError
+    p = degree
+
+    if cell is ReferenceInterval:
+        return np.array([[i / p] for i in range(p + 1)])
+    elif cell is ReferenceTriangle:
+        v = [[0, 0], [1, 0], [0, 1]]
+        e0 = [[(p - i) / p, i / p] for i in range(1, p)]
+        e1 = [[0, i / p] for i in range(1, p)]
+        e2 = [[i / p, 0] for i in range(1, p)]
+        interior = [[i / p, j / p] for i in range(1, p) for j in range(1, p - i)]
+        return np.array(v + e0 + e1 + e2 + interior)
+        # return np.array([[i / p, j / p] for i in range(p + 1) for j in range(p + 1 - i)])
+    elif cell is ReferenceRectangle:
+        v = [[0, 0], [1, 0], [1, 1], [0, 1]]
+        e0 = [[i / p, 0] for i in range(1, p)]
+        e1 = [[1, i / p] for i in range(1, p)]
+        e2 = [[0, i / p] for i in range(1, p)]
+        e3 = [[i / p, 1] for i in range(1, p)]
+        interior = [[i / p, j / p] for i in range(1, p) for j in range(1, p)]
+        return np.array((v + e0 + e1 + e2 + e3 + interior))
+    else:
+        raise ValueError("Unknown cell type: %s" % cell)
 
 
 def vandermonde_matrix(cell, degree, points, grad=False):
@@ -37,7 +59,38 @@ def vandermonde_matrix(cell, degree, points, grad=False):
     <ex-vandermonde>`.
     """
 
-    raise NotImplementedError
+    p = degree
+
+    if cell is ReferenceInterval:
+        if grad:
+            v = np.array([k * points[:, 0] ** max(k - 1, 0) for k in range(p + 1)]).T
+            v.shape = v.shape + (1,)
+        else:
+            v = np.array([points[:, 0] ** k for k in range(p + 1)]).T
+    elif cell is ReferenceTriangle:
+        if grad:
+            v = np.array([[(k - j) * points[:, 0] ** max(k - j - 1, 0) * points[:, 1] ** j,
+                           points[:, 0] ** (k - j) * j * points[:, 1] ** max(j - 1, 0)]
+                          for k in range(p + 1)
+                          for j in range(k + 1)]).transpose(2, 0, 1)
+        else:
+            v = np.array([points[:, 0] ** (k - j) * points[:, 1] ** j
+                          for k in range(p + 1)
+                          for j in range(k + 1)]).T
+    elif cell is ReferenceRectangle:
+        if grad:
+            v = np.array([[i * points[:, 0] ** max(i - 1, 0) * points[:, 1] ** j,
+                           points[:, 0] ** i * j * points[:, 1] ** max(j - 1, 0)]
+                          for i in range(p + 1)
+                          for j in range(p + 1)]).transpose(2, 0, 1)
+        else:
+            v = np.array([points[:, 0] ** i * points[:, 1] ** j
+                          for i in range(p + 1)
+                          for j in range(p + 1)]).T
+    else:
+        raise ValueError("Unknown cell type: %s" % cell)
+
+    return np.nan_to_num(v)
 
 
 class FiniteElement(object):
@@ -71,15 +124,15 @@ class FiniteElement(object):
         self.entity_nodes = entity_nodes
 
         if entity_nodes:
-            #: ``nodes_per_entity[d]`` is the number of entities
+            #: ``nodes_per_entity[d]`` is the number of nodes
             #: associated with an entity of dimension d.
             self.nodes_per_entity = np.array([len(entity_nodes[d][0])
-                                              for d in range(cell.dim+1)])
+                                              for d in range(cell.dim + 1)])
 
         # Replace this exception with some code which sets
         # self.basis_coefs
         # to an array of polynomial coefficients defining the basis functions.
-        raise NotImplementedError
+        self.basis_coefs = np.linalg.inv(vandermonde_matrix(cell, degree, nodes))
 
         #: The number of nodes in this element.
         self.node_count = nodes.shape[0]
@@ -105,7 +158,10 @@ class FiniteElement(object):
 
         """
 
-        raise NotImplementedError
+        if grad:
+            return np.einsum("ijk,jl->ilk", vandermonde_matrix(self.cell, self.degree, points, True), self.basis_coefs)
+        else:
+            return np.dot(vandermonde_matrix(self.cell, self.degree, points), self.basis_coefs)
 
     def interpolate(self, fn):
         """Interpolate fn onto this finite element by evaluating it
@@ -122,7 +178,7 @@ class FiniteElement(object):
 
         """
 
-        raise NotImplementedError
+        return np.array([fn(x) for x in self.nodes])
 
     def __repr__(self):
         return "%s(%s, %s)" % (self.__class__.__name__,
@@ -144,9 +200,28 @@ class LagrangeElement(FiniteElement):
         <ex-lagrange-element>`.
         """
 
-        raise NotImplementedError
+        nodes = lagrange_points(cell, degree)
+        if cell is ReferenceInterval:
+            entity_nodes = {0: {0: [0], 1: [degree]},
+                            1: {0: range(1, degree)}}
+        elif cell is ReferenceTriangle:
+            entity_nodes = {0: {0: [0], 1: [1], 2: [2]},
+                            1: {0: range(3, degree + 2), 1: range(degree + 2, 2 * degree + 1),
+                                2: range(2 * degree + 1, 3 * degree)},
+                            2: {0: range(3 * degree, round((degree + 1) * (degree + 2) / 2))}
+                            }
+        elif cell is ReferenceRectangle:
+            entity_nodes = {0: {0: [0], 1: [1], 2: [2], 3: [3]},
+                            1: {0: range(4, degree + 3),
+                                1: range(degree + 3, 2 * degree + 2),
+                                2: range(2 * degree + 2, 3 * degree + 1),
+                                3: range(3 * degree + 1, 4 * degree)},
+                            2: {0: range(4 * degree, (degree + 1) ** 2)}
+                            }
+        else:
+            raise ValueError("Unknown cell type: %s" % cell)
         # Use lagrange_points to obtain the set of nodes.  Once you
         # have obtained nodes, the following line will call the
         # __init__ method on the FiniteElement class to set up the
         # basis coefficients.
-        super(LagrangeElement, self).__init__(cell, degree, nodes)
+        super(LagrangeElement, self).__init__(cell, degree, nodes, entity_nodes)

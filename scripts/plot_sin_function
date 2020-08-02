@@ -2,11 +2,14 @@
 from fe_utils import *
 from math import sin, pi
 
-m = UnitSquareMesh(2, 2)
+# m = UnitSquareMesh(2, 2)
+m = LShapedRecMesh(2, 2)
+# m = LShapedMesh(4, 4)
 
-fe = LagrangeElement(ReferenceTriangle, 4)
+# fe = LagrangeElement(ReferenceTriangle, 2)
+fe = LagrangeElement(ReferenceRectangle, 1)
 
-fs = fs = FunctionSpace(m, fe)
+fs =  FunctionSpace(m, fe)
 
 f = Function(fs)
 

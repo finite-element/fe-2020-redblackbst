@@ -18,7 +18,43 @@ def assemble(fs, f):
     the function space in which to solve and the right hand side
     function."""
 
-    raise NotImplementedError
+    # Create an appropriate (complete) quadrature rule.
+    fe = fs.element
+    mesh = fs.mesh
+    Q = gauss_quadrature(fe.cell, 2 * fe.degree)
+
+    # Tabulate the basis functions and their gradients at the quadrature points.
+    phi = fe.tabulate(Q.points)
+    grad_phi = fe.tabulate(Q.points, True)
+
+    # Create the left hand side matrix and right hand side vector.
+    # This creates a sparse matrix because creating a dense one may
+    # well run your machine out of memory!
+    A = sp.lil_matrix((fs.node_count, fs.node_count))
+    l = np.zeros(fs.node_count)
+
+    # Now loop over all the cells and assemble A and l
+    for c in range(mesh.entity_counts[-1]):
+        # Find the appropriate global node numbers for this cell.
+        nodes = fs.cell_nodes[c, :]
+
+        # Compute the change of coordinates.
+        J = mesh.jacobian(c)
+        invJ = np.linalg.inv(J)
+        detJ = np.abs(np.linalg.det(J))
+
+        # Compute the actual cell quadrature.
+        l[nodes] += np.einsum("qi,k,qk,q->i", phi, f.values[nodes], phi, Q.weights) * detJ
+        p = np.einsum("ji,klj->kli", invJ, grad_phi)
+        A[np.ix_(nodes, nodes)] += np.einsum("ijq,q->ij", np.einsum("qid,qjd->ijq", p, p), Q.weights) * detJ
+
+    # Handle the boundary conditions
+    bnodes = boundary_nodes(fs)
+    A[bnodes] = 0.
+    A[bnodes, bnodes] = 1.
+    l[bnodes] = 0.
+
+    return A, l
 
 
 def boundary_nodes(fs):
@@ -54,7 +90,7 @@ def solve_poisson(degree, resolution, analytic=False, return_error=False):
 
     # Create a function to hold the analytic solution for comparison purposes.
     analytic_answer = Function(fs)
-    analytic_answer.interpolate(lambda x: sin(4*pi*x[0])*x[1]**2*(1.-x[1])**2)
+    analytic_answer.interpolate(lambda x: sin(4 * pi * x[0]) * x[1] ** 2 * (1. - x[1]) ** 2)
 
     # If the analytic answer has been requested then bail out now.
     if analytic:
@@ -63,8 +99,8 @@ def solve_poisson(degree, resolution, analytic=False, return_error=False):
     # Create the right hand side function and populate it with the
     # correct values.
     f = Function(fs)
-    f.interpolate(lambda x: (16*pi**2*(x[1] - 1)**2*x[1]**2 - 2*(x[1] - 1)**2 -
-                             8*(x[1] - 1)*x[1] - 2*x[1]**2) * sin(4*pi*x[0]))
+    f.interpolate(lambda x: (16 * pi ** 2 * (x[1] - 1) ** 2 * x[1] ** 2 - 2 * (x[1] - 1) ** 2 -
+                             8 * (x[1] - 1) * x[1] - 2 * x[1] ** 2) * sin(4 * pi * x[0]))
 
     # Assemble the finite element system.
     A, l = assemble(fs, f)
@@ -87,8 +123,8 @@ def solve_poisson(degree, resolution, analytic=False, return_error=False):
     # Return the solution and the error in the solution.
     return u, error
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     parser = ArgumentParser(
         description="""Solve a Poisson problem on the unit square.""")
     parser.add_argument("--analytic", action="store_true",

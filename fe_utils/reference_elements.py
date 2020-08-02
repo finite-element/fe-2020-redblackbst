@@ -22,6 +22,7 @@ class ReferenceCell(object):
 
         #: The geometric and topological dimension of the reference cell.
         self.dim = self.vertices.shape[1]
+        self.top_dim = self.vertices.shape[0]
 
         if self.dim != len(topology) - 1:
             raise ValueError("Dimension mismatch between vertices and topology.")
@@ -52,6 +53,7 @@ class ReferenceCell(object):
 
         return self.name
 
+
 #: A :class:`ReferenceCell` storing the geometry and topology of the interval [0, 1].
 ReferenceInterval = ReferenceCell(vertices=[[0.], [1.]],
                                   topology={0: {0: [0],
@@ -70,3 +72,17 @@ ReferenceTriangle = ReferenceCell(vertices=[[0., 0.], [1., 0.], [0., 1.]],
                                                 2: [0, 1]},
                                             2: {0: [0, 1, 2]}},
                                   name="ReferenceTriangle")
+
+#: A :class:`ReferenceCell` storing the geometry and topology of the rectangle
+#: with vertices [[0., 0.], [1., 0.], [1., 1.], [0., 1.]].
+ReferenceRectangle = ReferenceCell(vertices=[[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+                                   topology={0: {0: [0],
+                                                 1: [1],
+                                                 2: [2],
+                                                 3: [3]},
+                                             1: {0: [0, 1],
+                                                 1: [1, 2],
+                                                 2: [0, 3],
+                                                 3: [3, 2]},
+                                             2: {0: [0, 1, 2, 3]}},
+                                   name="ReferenceRectangle")

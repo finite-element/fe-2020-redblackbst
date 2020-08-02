@@ -1,5 +1,5 @@
 from numpy.polynomial.legendre import leggauss
-from .reference_elements import ReferenceInterval, ReferenceTriangle
+from .reference_elements import ReferenceInterval, ReferenceTriangle, ReferenceRectangle
 import numpy as np
 
 
@@ -86,6 +86,20 @@ def gauss_quadrature(cell, degree):
 
         weights = np.array([p * q * (1 - x[0])
                             for p, x in zip(p1.weights, p1.points)
+                            for q in q1.weights])
+
+    elif cell is ReferenceRectangle:
+        # The 2D rule is obtained using the 1D rule and the Duffy Transform.
+
+        p1 = gauss_quadrature(ReferenceInterval, degree + 1)
+        q1 = gauss_quadrature(ReferenceInterval, degree + 1)
+
+        points = np.array([(p[0], q[0])
+                           for p in p1.points
+                           for q in q1.points])
+
+        weights = np.array([p * q
+                            for p in p1.weights
                             for q in q1.weights])
 
     else:
